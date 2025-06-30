@@ -1,0 +1,11 @@
+{
+  "name": "com.alexmalyutindev.malioc",
+  "version": "1.0.0",
+  "displayName": "MaliOC Shader Analyzer",
+  "dependencies": {
+    "com.unity.editorcoroutines": "1.0.0",
+    "com.unity.nuget.newtonsoft-json": "3.2.1"
+  },
+  "unity": "2022.3",
+  "description": "Shader performance analyzer tool for Unity based on Mali Offline Compiler."
+}
