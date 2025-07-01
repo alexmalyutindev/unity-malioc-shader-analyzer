@@ -36,11 +36,12 @@ namespace MaliOC.Editor
         [J("driver")] public string Driver;
         [J("filename")] public string Filename;
         [J("hardware")] public Hardware Hardware;
-        [J("notes")] public string[] Notes;
         [J("properties")] public ShaderProperty[] Properties;
         [J("shader")] public ShaderShader Shader;
         [J("variants")] public Variant[] Variants;
+        [J("notes")] public string[] Notes;
         [J("warnings")] public string[] Warnings;
+        [J("errors")] public string[] Errors;
     }
 
     [Serializable]

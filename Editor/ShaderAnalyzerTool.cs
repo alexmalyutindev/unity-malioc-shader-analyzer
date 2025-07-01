@@ -27,24 +27,42 @@ namespace MaliOC.Editor
         private EditorCoroutine _maliOCProcessHandle;
         private GUIStyle _fieldLabelStyle;
 
-        private readonly Dictionary<string, bool> _keywords = new();
+        [SerializeField] private SerializableDictionary<string, bool> _keywords = new();
 
         [MenuItem("Tools/" + nameof(ShaderAnalyzerTool))]
         public static void Create()
         {
-            CreateWindow<ShaderAnalyzerTool>();
+            if (Selection.activeObject is Shader shader)
+            {
+                Open(shader);
+            }
+            else
+            {
+                Open();
+            }
+        }
+
+        public static void Open(Shader target = null)
+        {
+            var window = CreateWindow<ShaderAnalyzerTool>();
+            window.SelectShader(target);
         }
 
         private void OnSelectionChange()
         {
             if (Selection.activeObject is Shader shader)
             {
-                _shader = shader;
-                UnityEditor.Editor.CreateCachedEditor(_shader, typeof(ShaderInspector), ref _inspector);
-                Repaint();
-
-                Debug.Log(_shader);
+                SelectShader(shader);
             }
+        }
+
+        private void SelectShader(Shader shader)
+        {
+            _shader = shader;
+            UnityEditor.Editor.CreateCachedEditor(_shader, typeof(ShaderInspector), ref _inspector);
+            Repaint();
+
+            Debug.Log(_shader);
         }
 
         private void OnGUI()
@@ -57,35 +75,58 @@ namespace MaliOC.Editor
             using var scrollViewScope = new GUILayout.ScrollViewScope(_mainScrollPosition);
             _mainScrollPosition = scrollViewScope.scrollPosition;
 
-            if (_maliOCProcessHandle == null)
+            // Keywords selector
+            using (new EditorGUILayout.VerticalScope(EditorStyles.frameBox))
             {
-                using (new EditorGUILayout.VerticalScope(GUILayout.Height(300)))
+                var keywordsLabel = new GUIContent("Keywords");
+                var dropDownRect = GUILayoutUtility.GetRect(keywordsLabel, EditorStyles.dropDownList);
+                if (EditorGUI.DropdownButton(dropDownRect, keywordsLabel, FocusType.Keyboard))
                 {
-                    using var scrollViewScope2 = new GUILayout.ScrollViewScope(_definesScrollPosition);
-                    _definesScrollPosition = scrollViewScope2.scrollPosition;
-
+                    var menu = new GenericMenu();
                     foreach (var localKeyword in _shader.keywordSpace.keywords)
                     {
-                        if (!_keywords.TryGetValue(localKeyword.name, out var value))
+                        if (!_keywords.TryGetValue(localKeyword.name, out var enabled))
                         {
-                            value = false;
                             _keywords[localKeyword.name] = false;
                         }
 
-                        using (var changeScope = new EditorGUI.ChangeCheckScope())
-                        {
-                            var newValue = GUILayout.Toggle(value, localKeyword.name);
-                            if (changeScope.changed)
+                        menu.AddItem(
+                            new GUIContent(localKeyword.name),
+                            enabled,
+                            data =>
                             {
-                                _keywords[localKeyword.name] = newValue;
-                            }
+                                var kw = (LocalKeyword)data;
+                                _keywords[kw.name] = !_keywords[kw.name];
+                            },
+                            localKeyword
+                        );
+                    }
+
+                    menu.DropDown(dropDownRect);
+                }
+
+                foreach (var localKeyword in _shader.keywordSpace.keywords)
+                {
+                    var enabled = _keywords.GetValueOrDefault(localKeyword.name, false);
+                    if (enabled)
+                    {
+                        if (!GUILayout.Toggle(true, localKeyword.name))
+                        {
+                            _keywords[localKeyword.name] = false;
                         }
                     }
                 }
+            }
 
+            if (_maliOCProcessHandle == null)
+            {
                 if (GUILayout.Button("Analyze"))
                 {
-                    AnalyzeShader(_shader, _keywords.Where(pair => pair.Value).Select(pair => pair.Key).ToArray());
+                    var activeKeywords = _shader.keywordSpace.keywords
+                        .Where(keyword => _keywords[keyword.name])
+                        .Select(keyword => keyword.name)
+                        .ToArray();
+                    AnalyzeShader(_shader, activeKeywords, 0, 0);
                 }
             }
             else
@@ -143,64 +184,82 @@ namespace MaliOC.Editor
 
                 GUILayout.Space(5);
 
-                foreach (var variant in shader.Variants)
+                if (shader.Variants != null)
                 {
-                    EditorGUILayout.LabelField("Shader:", variant.Name);
-                    using (new EditorGUILayout.VerticalScope(EditorStyles.frameBox, GUILayout.Width(300)))
+                    foreach (var variant in shader.Variants)
                     {
-                        foreach (var variantProperty in variant.Properties)
+                        EditorGUILayout.LabelField("Shader:", variant.Name);
+                        using (new EditorGUILayout.VerticalScope(EditorStyles.frameBox, GUILayout.Width(300)))
                         {
-                            GUIContent valueContent;
-                            if (variantProperty.Value.Bool.HasValue)
+                            foreach (var variantProperty in variant.Properties)
                             {
-                                valueContent = new GUIContent(variantProperty.Value.Bool.Value ? "True" : "False");
-                            }
-                            else
-                            {
-                                var format = variantProperty.Name switch
+                                GUIContent valueContent;
+                                if (variantProperty.Value.Bool.HasValue)
                                 {
-                                    "fp16_arithmetic" or "thread_occupancy" or "fp16_idle_lanes" => @"0\%",
-                                    _ => "",
-                                };
-                                valueContent = new GUIContent(variantProperty.Value.Integer?.ToString(format));
+                                    valueContent = new GUIContent(variantProperty.Value.Bool.Value ? "True" : "False");
+                                }
+                                else
+                                {
+                                    var format = variantProperty.Name switch
+                                    {
+                                        "fp16_arithmetic" or "thread_occupancy" or "fp16_idle_lanes" => @"0\%",
+                                        _ => "",
+                                    };
+                                    valueContent = new GUIContent(variantProperty.Value.Integer?.ToString(format));
+                                }
+
+                                EditorGUILayout.LabelField(
+                                    new GUIContent(variantProperty.DisplayName, variantProperty.Description),
+                                    valueContent,
+                                    _fieldLabelStyle
+                                );
                             }
-
-                            EditorGUILayout.LabelField(
-                                new GUIContent(variantProperty.DisplayName, variantProperty.Description),
-                                valueContent,
-                                _fieldLabelStyle
-                            );
                         }
-                    }
 
-                    DrawPerformanceTable(variant.Performance, shader.Hardware);
+                        DrawPerformanceTable(variant.Performance, shader.Hardware);
+                    }
                 }
 
                 EditorGUILayout.Space(5);
 
-                EditorGUILayout.LabelField("Shader properties:");
-                using (new GUILayout.VerticalScope(EditorStyles.frameBox, GUILayout.Width(300)))
+                if (shader.Properties != null)
                 {
-                    foreach (var shaderProperty in shader.Properties)
+                    EditorGUILayout.LabelField("Shader properties:");
+                    using (new GUILayout.VerticalScope(EditorStyles.frameBox, GUILayout.Width(300)))
                     {
-                        EditorGUILayout.LabelField(
-                            new GUIContent(shaderProperty.DisplayName, shaderProperty.Description),
-                            new GUIContent(shaderProperty.Value ? "True" : "False"),
-                            _fieldLabelStyle
-                        );
+                        foreach (var shaderProperty in shader.Properties)
+                        {
+                            EditorGUILayout.LabelField(
+                                new GUIContent(shaderProperty.DisplayName, shaderProperty.Description),
+                                new GUIContent(shaderProperty.Value ? "True" : "False"),
+                                _fieldLabelStyle
+                            );
+                        }
                     }
                 }
 
-                GUILayout.Label("Notes:");
-                foreach (var note in shader.Notes)
+                if (shader.Errors != null)
                 {
-                    GUILayout.Label(note);
+                    foreach (var error in shader.Errors)
+                    {
+                        EditorGUILayout.HelpBox(error, MessageType.Error);
+                    }
                 }
 
-                GUILayout.Label("Warnings:");
-                foreach (var warning in shader.Warnings)
+                if (shader.Notes != null)
                 {
-                    GUILayout.Label(warning);
+                    foreach (var note in shader.Notes)
+                    {
+                        EditorGUILayout.HelpBox(note, MessageType.Warning);
+                    }
+                }
+
+                if (shader.Warnings != null)
+                {
+                    foreach (var warning in shader.Warnings)
+                    {
+                        EditorGUILayout.HelpBox(warning, MessageType.Warning);
+                    }
                 }
             }
         }
@@ -264,13 +323,16 @@ namespace MaliOC.Editor
             }
         }
 
-        private void AnalyzeShader(Shader sourceShader, string[] keywords)
+        private void AnalyzeShader(Shader sourceShader, string[] keywords, int subshaderIndex, int passIndex)
         {
             // TODO: Configure Shader variant!
+            // - Target API
+            // - Shader Stage
+            // - Graphics Tier
             var shaderData = new ShaderData(sourceShader);
-            var shaderPassData = shaderData
-                .GetSubshader(0)
-                .GetPass(0)
+            var compileInfo = shaderData
+                .GetSubshader(subshaderIndex)
+                .GetPass(passIndex)
                 .CompileVariant(
                     ShaderType.Fragment,
                     keywords,
@@ -278,10 +340,12 @@ namespace MaliOC.Editor
                     BuildTarget.Android,
                     GraphicsTier.Tier1,
                     forExternalTool: true
-                )
-                .ShaderData;
+                );
 
-            var tempPath = $"Temp/{sourceShader.name.Replace('/', '_')}.frag";
+            var shaderPassData = compileInfo.ShaderData;
+
+            Debug.Log(Encoding.UTF8.GetString(shaderPassData));
+            var tempPath = $"Temp/{sourceShader.name.Replace('/', '_')}.spv.frag";
             File.WriteAllBytes(tempPath, shaderPassData);
 
             _maliOCProcessHandle = EditorCoroutineUtility.StartCoroutine(
