@@ -1,10 +1,9 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Text;
+using MaliOC.Core;
 using Unity.EditorCoroutines.Editor;
 using UnityEditor;
 using UnityEditor.Rendering;
@@ -123,7 +122,7 @@ namespace MaliOC.Editor
                 if (GUILayout.Button("Analyze"))
                 {
                     var activeKeywords = _shader.keywordSpace.keywords
-                        .Where(keyword => _keywords[keyword.name])
+                        .Where(keyword => _keywords.GetValueOrDefault(keyword.name))
                         .Select(keyword => keyword.name)
                         .ToArray();
                     AnalyzeShader(_shader, activeKeywords, 0, 0);
@@ -344,7 +343,6 @@ namespace MaliOC.Editor
 
             var shaderPassData = compileInfo.ShaderData;
 
-            Debug.Log(Encoding.UTF8.GetString(shaderPassData));
             var tempPath = $"Temp/{sourceShader.name.Replace('/', '_')}.spv.frag";
             File.WriteAllBytes(tempPath, shaderPassData);
 
@@ -372,7 +370,7 @@ namespace MaliOC.Editor
             // TODO: Use vulkan only if target API is Vulkan!
             // TODO: Add OpenGLES support!
 
-            yield return RunMaliOC(
+            yield return MaliOfflineCompiler.Run(
                 shaderPassFile,
                 new[] { "--vulkan", "--format json" },
                 (output, error) =>
@@ -383,7 +381,7 @@ namespace MaliOC.Editor
                 }
             );
 
-            yield return RunMaliOC(
+            yield return MaliOfflineCompiler.Run(
                 shaderPassFile,
                 new[] { "--vulkan" },
                 (output, error) =>
@@ -392,39 +390,6 @@ namespace MaliOC.Editor
                     if (!string.IsNullOrEmpty(error)) Debug.LogError(error);
                 }
             );
-        }
-
-        private IEnumerator RunMaliOC(string inputFilePath, string[] additionalArgs, Action<string, string> onComplete)
-        {
-            var args = $"{string.Join(' ', additionalArgs)} \"{inputFilePath}\"";
-            Process process = new Process()
-            {
-                StartInfo = new ProcessStartInfo("malioc", args)
-                {
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                }
-            };
-
-            Debug.Log($"{process.StartInfo.FileName} {process.StartInfo.Arguments}");
-            var output = new StringBuilder();
-            var error = new StringBuilder();
-
-            process.OutputDataReceived += (_, dataEvent) => output.AppendLine(dataEvent.Data);
-            process.ErrorDataReceived += (_, dataEvent) => error.AppendLine(dataEvent.Data);
-
-            process.Start();
-            process.BeginOutputReadLine();
-            process.BeginErrorReadLine();
-
-            while (!process.HasExited)
-            {
-                yield return null;
-            }
-
-            var errorLog = error.ToString().Trim();
-            onComplete?.Invoke(output.ToString(), errorLog);
         }
     }
 }
