@@ -17,6 +17,9 @@ namespace MaliOC.Editor
     public class ShaderAnalyzerTool : EditorWindow
     {
         [SerializeField] private Shader _shader;
+        private ShaderData _shaderData;
+
+        // TODO: Add support for several reports!
         [SerializeField] private Report _report;
 
         private Vector2 _definesScrollPosition;
@@ -26,6 +29,10 @@ namespace MaliOC.Editor
         private EditorCoroutine _maliOCProcessHandle;
         private GUIStyle _fieldLabelStyle;
 
+        [SerializeField] private int _selectedShaderPassIndex;
+        [SerializeField] private string _selectedShaderPassName;
+
+        [SerializeField] private ShaderType _selectedShaderStage;
         [SerializeField] private SerializableDictionary<string, bool> _keywords = new();
 
         [MenuItem("Tools/" + nameof(ShaderAnalyzerTool))]
@@ -69,10 +76,52 @@ namespace MaliOC.Editor
             if (_shader == null) return;
             if (_inspector is not ShaderInspector shaderInspector) return;
 
+            _shaderData ??= new ShaderData(_shader);
+
             shaderInspector.DrawHeader();
 
             using var scrollViewScope = new GUILayout.ScrollViewScope(_mainScrollPosition);
             _mainScrollPosition = scrollViewScope.scrollPosition;
+
+            // Pass selector
+            {
+                var passLabel = new GUIContent("Shader Pass");
+                var selectedPassLabel =
+                    new GUIContent(_shaderData.GetSubshader(0).GetPass(_selectedShaderPassIndex).Name);
+
+                var dropDownRect = GUILayoutUtility.GetRect(passLabel, EditorStyles.dropDownList);
+                dropDownRect = EditorGUI.PrefixLabel(dropDownRect, passLabel);
+                if (EditorGUI.DropdownButton(dropDownRect, selectedPassLabel, FocusType.Keyboard))
+                {
+                    var menu = new GenericMenu();
+                    for (int passIndex = 0; passIndex < _shaderData.ActiveSubshader.PassCount; passIndex++)
+                    {
+                        var pass = _shaderData.ActiveSubshader.GetPass(passIndex);
+                        menu.AddItem(
+                            new GUIContent($"{passIndex} {pass.Name}"),
+                            _selectedShaderPassIndex == passIndex,
+                            data =>
+                            {
+                                var index = (int)data;
+                                _selectedShaderPassIndex = index;
+                                _selectedShaderPassName = _shaderData.GetSubshader(0).GetPass(index).Name;
+                            },
+                            passIndex
+                        );
+                    }
+
+                    menu.DropDown(dropDownRect);
+                }
+            }
+
+
+            // Stage selector
+            {
+                _selectedShaderStage = (ShaderType)EditorGUILayout.EnumPopup(
+                    new GUIContent("Shader stage"),
+                    _selectedShaderStage
+                );
+            }
 
             // Keywords selector
             using (new EditorGUILayout.VerticalScope(EditorStyles.frameBox))
@@ -125,7 +174,7 @@ namespace MaliOC.Editor
                         .Where(keyword => _keywords.GetValueOrDefault(keyword.name))
                         .Select(keyword => keyword.name)
                         .ToArray();
-                    AnalyzeShader(_shader, activeKeywords, 0, 0);
+                    AnalyzeShader(_shader, activeKeywords, 0, _selectedShaderPassIndex, _selectedShaderStage);
                 }
             }
             else
@@ -223,7 +272,12 @@ namespace MaliOC.Editor
 
                 if (shader.Properties != null)
                 {
-                    EditorGUILayout.LabelField("Shader properties:");
+                    GUILayout.Label(
+                        new GUIContent(
+                            "Shader properties:",
+                            "Shader properties section provides information about the behaviors of the shader program that can influence run-time performance."
+                        )
+                    );
                     using (new GUILayout.VerticalScope(EditorStyles.frameBox, GUILayout.Width(300)))
                     {
                         foreach (var shaderProperty in shader.Properties)
@@ -233,6 +287,41 @@ namespace MaliOC.Editor
                                 new GUIContent(shaderProperty.Value ? "True" : "False"),
                                 _fieldLabelStyle
                             );
+                        }
+                    }
+                }
+
+                if (shader.AttributeStreams != null)
+                {
+                    GUILayout.Label(
+                        new GUIContent(
+                            "Recommended attribute streams:",
+                            "Recommended attribute stream section defines the mapping of attributes to in-memory streams that you must use to get the optimal geometry memory bandwidth."
+                        )
+                    );
+                    using var _ = new EditorGUILayout.HorizontalScope();
+
+                    using (new EditorGUILayout.VerticalScope(EditorStyles.frameBox))
+                    {
+                        GUILayout.Label("Position attributes:", EditorStyles.boldLabel);
+                        foreach (var attributeStream in shader.AttributeStreams.Position)
+                        {
+                            using var __ = new EditorGUILayout.HorizontalScope();
+                            GUILayout.Label(attributeStream.Symbol, GUILayout.ExpandWidth(false));
+                            GUILayout.Label("location =", GUILayout.ExpandWidth(false));
+                            GUILayout.Label(attributeStream.Location.ToString());
+                        }
+                    }
+
+                    using (new EditorGUILayout.VerticalScope(EditorStyles.frameBox))
+                    {
+                        GUILayout.Label("Non-position attributes:", EditorStyles.boldLabel);
+                        foreach (var attributeStream in shader.AttributeStreams.NonPosition)
+                        {
+                            using var __ = new EditorGUILayout.HorizontalScope();
+                            GUILayout.Label(attributeStream.Symbol, GUILayout.ExpandWidth(false));
+                            GUILayout.Label("location =", GUILayout.ExpandWidth(false));
+                            GUILayout.Label(attributeStream.Location.ToString());
                         }
                     }
                 }
@@ -322,7 +411,13 @@ namespace MaliOC.Editor
             }
         }
 
-        private void AnalyzeShader(Shader sourceShader, string[] keywords, int subshaderIndex, int passIndex)
+        private void AnalyzeShader(
+            Shader sourceShader,
+            string[] keywords,
+            int subshaderIndex,
+            int passIndex,
+            ShaderType shaderStage
+        )
         {
             // TODO: Configure Shader variant!
             // - Target API
@@ -333,7 +428,7 @@ namespace MaliOC.Editor
                 .GetSubshader(subshaderIndex)
                 .GetPass(passIndex)
                 .CompileVariant(
-                    ShaderType.Fragment,
+                    shaderStage,
                     keywords,
                     ShaderCompilerPlatform.Vulkan,
                     BuildTarget.Android,
@@ -343,11 +438,21 @@ namespace MaliOC.Editor
 
             var shaderPassData = compileInfo.ShaderData;
 
-            var tempPath = $"Temp/{sourceShader.name.Replace('/', '_')}.spv.frag";
+            // TODO: Pass stage flag instead of file extension.
+            var extension = shaderStage switch
+            {
+                ShaderType.Vertex => ".vert",
+                ShaderType.Fragment => ".frag",
+                _ => string.Empty
+            };
+
+            var tempPath = $"Temp/{sourceShader.name.Replace('/', '_')}{extension}";
             File.WriteAllBytes(tempPath, shaderPassData);
 
-            _maliOCProcessHandle = EditorCoroutineUtility.StartCoroutine(
-                MakePassReport(tempPath, json =>
+            var makePassReport = MakePassReport(
+                tempPath,
+                shaderStage,
+                json =>
                 {
                     try
                     {
@@ -358,21 +463,22 @@ namespace MaliOC.Editor
                         Debug.LogException(e);
                     }
 
-                    Repaint();
                     _maliOCProcessHandle = null;
-                }),
-                this
-            );
+                    Repaint();
+                });
+            _maliOCProcessHandle = EditorCoroutineUtility.StartCoroutine(makePassReport, this);
         }
 
-        private IEnumerator MakePassReport(string shaderPassFile, Action<string> onComplete)
+        private IEnumerator MakePassReport(string shaderPassFile, ShaderType shaderStage, Action<string> onComplete)
         {
             // TODO: Use vulkan only if target API is Vulkan!
             // TODO: Add OpenGLES support!
 
             yield return MaliOfflineCompiler.Run(
                 shaderPassFile,
-                new[] { "--vulkan", "--format json" },
+                shaderStage,
+                MaliOfflineCompiler.TargetApi.Vulkan,
+                MaliOfflineCompiler.ReportType.Json,
                 (output, error) =>
                 {
                     Debug.Log(output);
@@ -383,7 +489,9 @@ namespace MaliOC.Editor
 
             yield return MaliOfflineCompiler.Run(
                 shaderPassFile,
-                new[] { "--vulkan" },
+                shaderStage,
+                MaliOfflineCompiler.TargetApi.Vulkan,
+                MaliOfflineCompiler.ReportType.Basic,
                 (output, error) =>
                 {
                     Debug.Log(output);

@@ -36,6 +36,7 @@ namespace MaliOC.Core
         [J("driver")] public string Driver;
         [J("filename")] public string Filename;
         [J("hardware")] public Hardware Hardware;
+        [J("attribute_streams")] public AttributeStreams AttributeStreams;
         [J("properties")] public ShaderProperty[] Properties;
         [J("shader")] public ShaderShader Shader;
         [J("variants")] public Variant[] Variants;
@@ -59,6 +60,20 @@ namespace MaliOC.Core
         [J("description")] public string Description;
         [J("display_name")] public string DisplayName;
         [J("name")] public string Name;
+    }
+
+    [Serializable]
+    public class AttributeStreams
+    {
+        [J("nonposition")] public AttributeStream[] NonPosition;
+        [J("position")] public AttributeStream[] Position;
+    }
+
+    [Serializable]
+    public class AttributeStream
+    {
+        [J("location")] public int Location;
+        [J("symbol")] public string Symbol;
     }
 
     [Serializable]

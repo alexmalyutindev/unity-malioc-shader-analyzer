@@ -2,12 +2,55 @@
 using System.Collections;
 using System.Diagnostics;
 using System.Text;
+using UnityEditor.Rendering;
 using Debug = UnityEngine.Debug;
 
 namespace MaliOC.Core
 {
     public static class MaliOfflineCompiler
     {
+        public enum TargetApi
+        {
+            Vulkan,
+            GLES3x,
+        }
+        
+        public enum ReportType
+        {
+            Basic,
+            Json,
+        }
+        
+        public static IEnumerator Run(
+            string inputFilePath,
+            ShaderType shaderStage, 
+            TargetApi targetApi,
+            ReportType reportType,
+            Action<string, string> onComplete
+        )
+        {
+            string[] args = {
+                targetApi switch
+                {
+                    TargetApi.Vulkan => "--vulkan",
+                    _ => string.Empty,
+                },
+                shaderStage switch
+                {
+                    ShaderType.Vertex => "--vertex",
+                    ShaderType.Fragment => "--fragment",
+                    _ => string.Empty,
+                },
+                reportType switch
+                {
+                    ReportType.Json => "--format json",
+                    _ => string.Empty,
+                },
+                "--detailed"
+            };
+            yield return Run(inputFilePath, args, onComplete);
+        }
+        
         public static IEnumerator Run(string inputFilePath, string[] additionalArgs, Action<string, string> onComplete)
         {
             var args = $"{string.Join(' ', additionalArgs)} \"{inputFilePath}\"";
