@@ -199,8 +199,8 @@ namespace MaliOC.Editor
             {
                 GUILayout.BeginHorizontal();
                 var v = report.Producer.Version;
-                EditorGUILayout.LabelField(
-                    $"{report.Producer.Name} v{v[0]}.{v[1]}.{v[2]} Build ({report.Producer.Build})");
+                var version = v.Length == 3 ? $"{v[0]}.{v[1]}.{v[2]}" : "<error>";
+                EditorGUILayout.LabelField($"{report.Producer.Name} v{version} Build ({report.Producer.Build})");
                 if (EditorGUILayout.LinkButton("Documentation"))
                 {
                     Application.OpenURL(report.Producer.Documentation.AbsoluteUri);
