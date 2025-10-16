@@ -1,3 +1,6 @@
-﻿{
-  "name": "MaliOC.Core"
+{
+  "name": "MaliOC.Core",
+  "includePlatforms": [
+    "Editor"
+  ]
 }
